@@ -15,7 +15,7 @@ import java.util.*;
 import java.util.List;
 import java.util.regex.*;
 
-/** CodeNote: a lightweight VS Code-inspired Java editor built with Swing. */
+/** CodeNote: a lightweight VS Code-inspired Java and Python editor built with Swing. */
 public class CodeNoteApp {
     private JFrame frame;
     private JTabbedPane tabs;
@@ -32,7 +32,7 @@ public class CodeNoteApp {
     public static void main(String[] args) { SwingUtilities.invokeLater(() -> new CodeNoteApp().start()); }
 
     private void start() {
-        frame = new JFrame("CodeNote — Java Editor");
+        frame = new JFrame("CodeNote — Java & Python Editor");
         frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         frame.setSize(1200, 780); frame.setMinimumSize(new Dimension(850, 560));
         frame.setLocationRelativeTo(null);
@@ -60,7 +60,7 @@ public class CodeNoteApp {
         addNewTab(); applyTheme();
         frame.addWindowListener(new WindowAdapter(){ public void windowClosing(WindowEvent e){ if(confirmCloseAll()) { saveAll(); frame.dispose(); } }});
         frame.setVisible(true);
-        appendTerminal("CodeNote 준비 완료. Java " + Runtime.version().feature() + " 감지됨.\n");
+        appendTerminal("CodeNote 준비 완료. Java " + Runtime.version().feature() + " 감지됨. Python은 Python 3가 필요합니다.\n");
     }
 
     private JMenuBar createMenu(){
@@ -71,14 +71,14 @@ public class CodeNoteApp {
         item(file,"다른 이름으로 저장",null,e->saveAsCurrent()); file.addSeparator(); item(file,"폴더 열기",null,e->chooseWorkspace());
         JMenu edit=new JMenu("편집"); item(edit,"찾기",KeyStroke.getKeyStroke(KeyEvent.VK_F,InputEvent.CTRL_DOWN_MASK),e->showFind());
         JMenu view=new JMenu("보기"); item(view,"테마 전환",null,e->{dark=!dark;applyTheme();}); item(view,"터미널 표시/숨기기",null,e->terminalPanel.setVisible(!terminalPanel.isVisible()));
-        JMenu run=new JMenu("실행"); item(run,"현재 Java 파일 실행",KeyStroke.getKeyStroke(KeyEvent.VK_F6,0),e->compileAndRun());
+        JMenu run=new JMenu("실행"); item(run,"현재 파일 실행 (Java / Python)",KeyStroke.getKeyStroke(KeyEvent.VK_F6,0),e->compileAndRun());
         bar.add(file);bar.add(edit);bar.add(view);bar.add(run);return bar;
     }
     private void item(JMenu m,String name,KeyStroke key, java.util.function.Consumer<ActionEvent> action){ JMenuItem i=new JMenuItem(name); if(key!=null)i.setAccelerator(key);i.addActionListener(e->action.accept(e));m.add(i); }
 
-    private void addNewTab(){ EditorTab ed=new EditorTab(null); String title="새 파일"; tabs.addTab(title,ed.root); editors.put(ed.root,ed); tabs.setSelectedComponent(ed.root); ed.area.requestFocusInWindow(); }
+    private void addNewTab(){ EditorTab ed=new EditorTab(null); tabs.addTab("새 파일",ed.root); editors.put(ed.root,ed); tabs.setSelectedComponent(ed.root); ed.area.requestFocusInWindow(); }
     private EditorTab current(){ return editors.get(tabs.getSelectedComponent()); }
-    private void chooseFile(){ JFileChooser c=new JFileChooser(); c.setFileFilter(new FileNameExtensionFilter("텍스트 및 Java 파일","txt","java","md","json","xml","properties","log")); if(c.showOpenDialog(frame)==JFileChooser.APPROVE_OPTION)openFile(c.getSelectedFile().toPath()); }
+    private void chooseFile(){ JFileChooser c=new JFileChooser(); c.setFileFilter(new FileNameExtensionFilter("코드 및 텍스트 파일","java","py","txt","md","json","xml","properties","log")); if(c.showOpenDialog(frame)==JFileChooser.APPROVE_OPTION)openFile(c.getSelectedFile().toPath()); }
     private void openFile(Path p){ try { for(EditorTab e:editors.values())if(p.equals(e.path)){tabs.setSelectedComponent(e.root);return;} String s=Files.readString(p,StandardCharsets.UTF_8); EditorTab ed=new EditorTab(p);ed.area.setText(s);ed.dirty=false;ed.updateTitle();tabs.addTab(p.getFileName().toString(),ed.root);editors.put(ed.root,ed);tabs.setSelectedComponent(ed.root); }catch(IOException ex){error("파일을 열 수 없습니다: "+ex.getMessage());} }
     private void chooseWorkspace(){ JFileChooser c=new JFileChooser();c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);if(c.showOpenDialog(frame)==JFileChooser.APPROVE_OPTION){workspace=c.getSelectedFile().toPath();refreshTree();} }
     private void refreshTree(){ DefaultMutableTreeNode root=new DefaultMutableTreeNode(workspace.toFile());buildTree(root,workspace,0);fileTree.setModel(new DefaultTreeModel(root)); }
@@ -91,7 +91,27 @@ public class CodeNoteApp {
     private boolean confirmCloseAll(){for(EditorTab e:editors.values())if(e.dirty){int r=JOptionPane.showConfirmDialog(frame,"저장되지 않은 변경 사항이 있습니다. 저장할까요?","CodeNote",JOptionPane.YES_NO_CANCEL_OPTION);if(r==JOptionPane.CANCEL_OPTION||r==JOptionPane.CLOSED_OPTION)return false;if(r==JOptionPane.YES_OPTION){tabs.setSelectedComponent(e.root);saveCurrent();}}return true;}
     private void showFind(){EditorTab e=current();if(e==null)return;String q=JOptionPane.showInputDialog(frame,"찾을 내용:");if(q==null||q.isEmpty())return;String text=e.area.getText();int start=Math.max(0,e.area.getCaretPosition());int at=text.indexOf(q,start);if(at<0)at=text.indexOf(q);if(at>=0){e.area.requestFocus();e.area.select(at,at+q.length());}else JOptionPane.showMessageDialog(frame,"검색 결과가 없습니다.");}
 
-    private void compileAndRun(){EditorTab e=current();if(e==null)return;if(e.path==null){JOptionPane.showMessageDialog(frame,"먼저 Java 파일로 저장해 주세요.");saveAsCurrent();e=current();if(e==null||e.path==null)return;}if(!e.path.toString().endsWith(".java")){error(".java 파일만 실행할 수 있습니다.");return;}write(e);Path source=e.path.toAbsolutePath();Path out=source.getParent().resolve(".codenote-build");try{Files.createDirectories(out);String javac=javaTool("javac");ProcessBuilder pb=new ProcessBuilder(javac,"-encoding","UTF-8","-d",out.toString(),source.toString());pb.redirectErrorStream(true);Process p=pb.start();String compile=new String(p.getInputStream().readAllBytes(),StandardCharsets.UTF_8);int code=p.waitFor();appendTerminal("$ javac "+source.getFileName()+"\n"+compile);if(code!=0){appendTerminal("컴파일 실패 (exit "+code+")\n");return;}String cls=source.getFileName().toString().replaceFirst("\\.java$","");appendTerminal("$ java "+cls+"\n");Process run=new ProcessBuilder(javaTool("java"),"-cp",out.toString(),cls).directory(source.getParent().toFile()).redirectErrorStream(true).start();new Thread(()->{try{String output=new String(run.getInputStream().readAllBytes(),StandardCharsets.UTF_8);int rc=run.waitFor();SwingUtilities.invokeLater(()->appendTerminal(output+"\n[프로그램 종료: "+rc+"]\n"));}catch(Exception ex){SwingUtilities.invokeLater(()->appendTerminal(ex.toString()+"\n"));}}).start();}catch(Exception ex){error("실행 오류: "+ex.getMessage());}}
+    private void compileAndRun(){
+        EditorTab e=current();if(e==null)return;
+        if(e.path==null){JOptionPane.showMessageDialog(frame,"먼저 .java 또는 .py 파일로 저장해 주세요.");saveAsCurrent();e=current();if(e==null||e.path==null)return;}
+        String file=e.path.toString().toLowerCase(Locale.ROOT);
+        if(file.endsWith(".py")){runPython(e);return;}
+        if(!file.endsWith(".java")){error(".java 또는 .py 파일만 실행할 수 있습니다.");return;}
+        write(e);Path source=e.path.toAbsolutePath();Path out=source.getParent().resolve(".codenote-build");
+        try{Files.createDirectories(out);String javac=javaTool("javac");ProcessBuilder pb=new ProcessBuilder(javac,"-encoding","UTF-8","-d",out.toString(),source.toString());pb.redirectErrorStream(true);Process p=pb.start();String compile=new String(p.getInputStream().readAllBytes(),StandardCharsets.UTF_8);int code=p.waitFor();appendTerminal("$ javac "+source.getFileName()+"\n"+compile);if(code!=0){appendTerminal("컴파일 실패 (exit "+code+")\n");return;}String cls=source.getFileName().toString().replaceFirst("\\.java$","");appendTerminal("$ java "+cls+"\n");Process run=new ProcessBuilder(javaTool("java"),"-cp",out.toString(),cls).directory(source.getParent().toFile()).redirectErrorStream(true).start();new Thread(()->{try{String output=new String(run.getInputStream().readAllBytes(),StandardCharsets.UTF_8);int rc=run.waitFor();SwingUtilities.invokeLater(()->appendTerminal(output+"\n[프로그램 종료: "+rc+"]\n"));}catch(Exception ex){SwingUtilities.invokeLater(()->appendTerminal(ex.toString()+"\n"));}}).start();}catch(Exception ex){error("실행 오류: "+ex.getMessage());}
+    }
+    private void runPython(EditorTab e){
+        write(e);Path source=e.path.toAbsolutePath();
+        try{
+            List<String> command=new ArrayList<>();
+            if(isWindows()){command.add("py");command.add("-3");}else{command.add("python3");}
+            command.add(source.toString());
+            appendTerminal("$ "+String.join(" ",command)+"\n");
+            ProcessBuilder pb=new ProcessBuilder(command).directory(source.getParent().toFile()).redirectErrorStream(true);
+            Process process=pb.start();
+            new Thread(()->{try{String output=new String(process.getInputStream().readAllBytes(),StandardCharsets.UTF_8);int code=process.waitFor();SwingUtilities.invokeLater(()->appendTerminal(output+"\n[Python 프로그램 종료: "+code+"]\n"));}catch(Exception ex){SwingUtilities.invokeLater(()->appendTerminal("Python 실행 오류: "+ex.getMessage()+"\nPython 3가 설치되어 있고 PATH에 등록되어 있는지 확인하세요.\n"));}}).start();
+        }catch(IOException ex){appendTerminal("Python 실행 실패: "+ex.getMessage()+"\nPython 3 설치 및 PATH 설정을 확인하세요.\n");}
+    }
     private String javaTool(String name){Path home=Paths.get(System.getProperty("java.home"),"bin",name+(isWindows()?".exe":""));return Files.exists(home)?home.toString():name;}
     private boolean isWindows(){return System.getProperty("os.name").toLowerCase().contains("win");}
     private void runShellCommand(){String cmd=commandField.getText().trim();if(cmd.isEmpty())return;commandField.setText("");appendTerminal("> "+cmd+"\n");try{ProcessBuilder pb=isWindows()?new ProcessBuilder("cmd.exe","/c",cmd):new ProcessBuilder("/bin/sh","-lc",cmd);if(workspace!=null)pb.directory(workspace.toFile());pb.redirectErrorStream(true);Process p=pb.start();new Thread(()->{try{String out=new String(p.getInputStream().readAllBytes(),StandardCharsets.UTF_8);p.waitFor();SwingUtilities.invokeLater(()->appendTerminal(out+"\n"));}catch(Exception ex){SwingUtilities.invokeLater(()->appendTerminal(ex+"\n"));}}).start();}catch(IOException ex){appendTerminal(ex+"\n");}}
@@ -113,7 +133,16 @@ public class CodeNoteApp {
         void writeQuietly(){try{Files.writeString(path,area.getText(),StandardCharsets.UTF_8);dirty=false;updateTitle();}catch(IOException ex){appendTerminal("자동 저장 실패: "+ex.getMessage()+"\n");}}
         void updateTitle(){int i=tabs.indexOfComponent(root);String name=path==null?"새 파일":path.getFileName().toString();if(i>=0)tabs.setTitleAt(i,(dirty?"● ":"")+name);}
         void applyTheme(){Color bg=dark?new Color(30,30,30):Color.WHITE,fg=dark?new Color(212,212,212):new Color(35,35,35);area.setBackground(bg);area.setForeground(fg);area.setCaretColor(fg);status.setBackground(dark?DARK_PANEL:LIGHT_PANEL);status.setForeground(fg);highlight();}
-        void highlight(){SwingUtilities.invokeLater(()->{if(!area.isDisplayable()&&tabs.indexOfComponent(root)<0)return;String text=area.getText();StyledDocument doc=area.getStyledDocument();Style base=area.addStyle("base",null);StyleConstants.setForeground(base,dark?new Color(212,212,212):new Color(35,35,35));doc.setCharacterAttributes(0,doc.getLength(),base,true);if(!text.isEmpty()){colorPattern(doc,text,"\\b(public|private|protected|static|final|void|class|interface|enum|extends|implements|new|return|if|else|for|while|do|switch|case|break|continue|try|catch|finally|throw|throws|import|package|this|super|var|instanceof)\\b",new Color(86,156,214));colorPattern(doc,text,"\\b(int|long|short|byte|double|float|boolean|char|String|Integer|Long|Object|System|Math|List|Map|Set)\\b",new Color(78,201,176));colorPattern(doc,text,"\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'",new Color(206,145,120));colorPattern(doc,text,"//[^\\n]*|/\\*[\\s\\S]*?\\*/",new Color(106,153,85));colorPattern(doc,text,"\\b\\d+(?:\\.\\d+)?\\b",new Color(181,206,168));}});}
+        void highlight(){SwingUtilities.invokeLater(()->{if(!area.isDisplayable()&&tabs.indexOfComponent(root)<0)return;String text=area.getText();StyledDocument doc=area.getStyledDocument();Style base=area.addStyle("base",null);StyleConstants.setForeground(base,dark?new Color(212,212,212):new Color(35,35,35));doc.setCharacterAttributes(0,doc.getLength(),base,true);if(!text.isEmpty()){
+            colorPattern(doc,text,"\\b(public|private|protected|static|final|void|class|interface|enum|extends|implements|new|return|if|else|for|while|do|switch|case|break|continue|try|catch|finally|throw|throws|import|package|this|super|var|instanceof)\\b",new Color(86,156,214));
+            colorPattern(doc,text,"\\b(int|long|short|byte|double|float|boolean|char|String|Integer|Long|Object|System|Math|List|Map|Set)\\b",new Color(78,201,176));
+            colorPattern(doc,text,"\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'",new Color(206,145,120));
+            colorPattern(doc,text,"//[^\\n]*|/\\*[\\s\\S]*?\\*/",new Color(106,153,85));
+            colorPattern(doc,text,"#.*",new Color(106,153,85));
+            colorPattern(doc,text,"\\b(def|class|return|if|elif|else|for|while|in|try|except|finally|raise|import|from|as|with|pass|break|continue|lambda|yield|async|await|global|nonlocal|assert|del|is|not|and|or)\\b",new Color(86,156,214));
+            colorPattern(doc,text,"\\b(True|False|None|self|print|len|range|str|int|float|bool|list|dict|set|tuple|super|open)\\b",new Color(78,201,176));
+            colorPattern(doc,text,"\\b\\d+(?:\\.\\d+)?\\b",new Color(181,206,168));
+        }});}
         void colorPattern(StyledDocument d,String text,String regex,Color color){Matcher m=Pattern.compile(regex).matcher(text);Style s=area.addStyle("token"+color.getRGB(),null);StyleConstants.setForeground(s,color);while(m.find())d.setCharacterAttributes(m.start(),m.end()-m.start(),s,true);}
     }
     private class LineNumbers extends JComponent{JTextPane text;LineNumbers(JTextPane t){text=t;text.getDocument().addDocumentListener(new DocumentListener(){public void insertUpdate(DocumentEvent e){repaint();}public void removeUpdate(DocumentEvent e){repaint();}public void changedUpdate(DocumentEvent e){repaint();}});setPreferredSize(new Dimension(48,1));}protected void paintComponent(Graphics g){super.paintComponent(g);g.setColor(dark?new Color(45,45,45):new Color(245,245,245));g.fillRect(0,0,getWidth(),getHeight());g.setFont(text.getFont());g.setColor(dark?new Color(110,110,110):new Color(130,130,130));FontMetrics fm=g.getFontMetrics();Element root=text.getDocument().getDefaultRootElement();for(int i=0;i<root.getElementCount();i++){try{Rectangle r=text.modelToView2D(root.getElement(i).getStartOffset()).getBounds();String n=String.valueOf(i+1);g.drawString(n,getWidth()-fm.stringWidth(n)-10,r.y+fm.getAscent());}catch(Exception ignored){}}}}
